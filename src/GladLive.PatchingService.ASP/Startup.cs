@@ -1,56 +1,80 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using GladLive.Security.Common;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Hosting.Internal;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
+using GladNet.ASP.Formatters;
+using GladNet.Serializer.Protobuf;
+using Microsoft.Extensions.Configuration;
 
 namespace GladLive.PatchingService.ASP
 {
-    public class Startup
-    {
-        public Startup(IHostingEnvironment env)
-        {
-            var builder = new ConfigurationBuilder()
-                .SetBasePath(env.ContentRootPath)
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true);
+	public class Startup
+	{
+		public IConfigurationRoot Configuration { get; }
 
-            if (env.IsEnvironment("Development"))
-            {
-                // This will push telemetry data through Application Insights pipeline faster, allowing you to view results immediately.
-                builder.AddApplicationInsightsSettings(developerMode: true);
-            }
+		public Startup(IHostingEnvironment env)
+		{
+			var builder = new ConfigurationBuilder()
+				.SetBasePath(env.ContentRootPath)
+				.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+				.AddJsonFile($"appsettings.{env.EnvironmentName}.json", optional: true);
 
-            builder.AddEnvironmentVariables();
-            Configuration = builder.Build();
-        }
+			builder.AddEnvironmentVariables();
+			Configuration = builder.Build();
+		}
 
-        public IConfigurationRoot Configuration { get; }
+		public void ConfigureServices(IServiceCollection services)
+		{
+			//This adds the MVC core features and GladNet features
+			services.AddGladNet(new ProtobufnetSerializerStrategy(), new ProtobufnetDeserializerStrategy(), new ProtobufnetRegistry());
+			services.AddLogging();
 
-        // This method gets called by the runtime. Use this method to add services to the container
-        public void ConfigureServices(IServiceCollection services)
-        {
-            // Add framework services.
-            services.AddApplicationInsightsTelemetry(Configuration);
+			//We only have a protobuf-net Web API for authentication right now
 
-            services.AddMvc();
-        }
+			//This is required due to fault in ASP involving model validation with IPAddress
+			//Reference: https://github.com/aspnet/Mvc/issues/4571 for more information
+			/*services.Configure<MvcOptions>(c =>
+			{
+				c.ValueProviderFactories.Add(new DefaultTypeBasedExcludeFilter(typeof(IPAddress)));
+			});*/
 
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env, ILoggerFactory loggerFactory)
-        {
-            loggerFactory.AddConsole(Configuration.GetSection("Logging"));
-            loggerFactory.AddDebug();
+			services.AddSingleton<ICryptoService, RSACryptoProviderAdapter>(x =>
+			{
+				return new RSACryptoProviderAdapter(new RSACryptoServiceProvider());
+			});
+		}
 
-            app.UseApplicationInsightsRequestTelemetry();
+		public void Configure(IApplicationBuilder app, ILoggerFactory loggerFactory)
+		{
+			//Comment this out for IIS but we shouldn't need it. We'll be running this on
+			//Linux behind AWS Elastic Load Balancer probably
+			//app.UseIISPlatformHandler();
 
-            app.UseApplicationInsightsExceptionTelemetry();
+			loggerFactory.AddConsole(LogLevel.Information);
+			app.UseMvc();
 
-            app.UseMvc();
-        }
-    }
+			//We have to register the payload types
+			//We could maybe do some static analysis to find referenced payloads and auto generate this code
+			//or find them at runtime but for now this is ok
+		}
+
+		//This changed in RTM. Fluently build and setup the web hosting
+		public static void Main(string[] args) => new WebHostBuilder()
+			.UseKestrel()
+			.UseContentRoot(Directory.GetCurrentDirectory())
+			.UseStartup<Startup>()
+			.Build()
+			.Run();
+	}
 }
