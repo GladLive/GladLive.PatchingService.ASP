@@ -40,8 +40,6 @@ namespace GladLive.PatchingService.ASP
 			services.AddGladNet(new ProtobufnetSerializerStrategy(), new ProtobufnetDeserializerStrategy(), new ProtobufnetRegistry());
 			services.AddLogging();
 
-			//We only have a protobuf-net Web API for authentication right now
-
 			//This is required due to fault in ASP involving model validation with IPAddress
 			//Reference: https://github.com/aspnet/Mvc/issues/4571 for more information
 			/*services.Configure<MvcOptions>(c =>
